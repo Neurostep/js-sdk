@@ -3,7 +3,7 @@
 "use strict";
 
 if (!window.Echo) window.Echo = {};
-if (!Echo.Tests) Echo.Tests = {"Unit": {}, "Common": {}};
+if (!Echo.Tests) Echo.Tests = {"Unit": {}, "Common": {}, "running": 0, "tests": []};
 
 // collection of component initializers
 var _initializers = {};
@@ -59,8 +59,17 @@ Echo.Tests.runTests = function() {
 				Echo.Tests.Stats.functions.tested[suite.info.className + "." + name] = true;
 			});
 		});
-		suite.run();
+		if (Echo.Tests.isDependent()) {
+			suite.run(normalizedName);
+		} else {
+			suite.assemble(normalizedName);
+		}
 	});
+	if (!Echo.Tests.isDependent()) {
+		for (var i=0; i < 5; i++) {
+			Echo.Tests.run();
+		}
+	}
 };
 
 Echo.Tests.getComponentInitializer = function(name) {
@@ -81,12 +90,69 @@ Echo.Tests.Common = function() {
 	};
 };
 
-Echo.Tests.Common.prototype.run = function() {
+Echo.Tests.initIframe = function() {
+	var body = document.body,
+		iframe = QUnit.iframe = document.createElement( "iframe" ),
+		iframeWin;
+
+	iframe.className = "qunit-subsuite";
+	body.appendChild( iframe );
+
+	function onIframeLoad() {
+/*
+		var module, test,
+		count = 0;
+
+
+		iframeWin.QUnit.moduleStart(function( data ) {
+			// capture module name for messages
+			module = data.name;
+		});
+
+		iframeWin.QUnit.testStart(function( data ) {
+			// capture test name for messages
+			test = data.name;
+		});
+*/
+		iframeWin.QUnit.testDone(function() {
+//console.log(this);
+			window.parent.Echo.Tests.onTestFinish.apply(window.parent.Echo.Tests, arguments);
+			window.parent.console.log("TEST FINISHED!", arguments);
+			body.removeChild( iframe );
+			//test = null;
+		});
+/*
+		iframeWin.QUnit.log(function( data ) {
+			if (test === null) {
+				return;
+			}
+window.parent.console.log("DATA: ", data);
+			// pass all test details through to the main page
+			var message = module + ": " + test + ": " + data.message;
+			expect( ++count );
+			QUnit.push( data.result, data.actual, data.expected, message );
+		});
+*/
+/*
+		iframeWin.QUnit.done(function() {
+			// start the wrapper test from the main page
+			start();
+		});
+*/
+	}
+	QUnit.addEvent( iframe, "load", onIframeLoad );
+	iframeWin = iframe.contentWindow;
+	return iframe;
+};
+
+Echo.Tests.Common.prototype.run = function(module) {
 	var self = this;
+	var count = 0;
 	this.info = this.info || {};
 	this.info.functions = this.info.functions || [];
 	this.info.className = this.info.className || "";
 	$.each(this.tests, function(name, test) {
+		count++;
 		test.config = test.config || {};
 		if (test.instance && !$.isFunction(test.instance)) {
 			test.config.async = true;
@@ -105,32 +171,85 @@ Echo.Tests.Common.prototype.run = function() {
 		if (test.config.description) {
 			name = name + " (" + test.config.description + ")";
 		}
-		QUnit.asyncTest(name, function() {
-			self.prepareEnvironment(test, function() {
-				// time in milliseconds after which test will time out
-				QUnit.config.testTimeout = test.config.testTimeout || self.config.testTimeout;
-				if (!test.instance) {
-					check();
-					// we need to switch to the next test
-					// if it was NOT defined as async
-					if (!test.config.async) {
+		if (Echo.Tests.isDependent()) {
+			QUnit.asyncTest(name, function() {
+				self.prepareEnvironment(test, function() {
+					// time in milliseconds after which test will time out
+					QUnit.config.testTimeout = test.config.testTimeout || self.config.testTimeout;
+					if (!test.instance) {
+						check();
+						// we need to switch to the next test
+						// if it was NOT defined as async
+						if (!test.config.async) {
+							QUnit.start();
+						}
+					} else if ($.isFunction(test.instance)) {
+						check(test.instance());
 						QUnit.start();
+					} else {
+						var config = $.extend({
+							"appkey": "test.aboutecho.com",
+							"target": $("#qunit-fixture")
+						}, test.instance.config || {});
+						var component = Echo.Utils.getComponent(test.instance.name);
+						var instance = new component(config);
+						check(instance);
 					}
-				} else if ($.isFunction(test.instance)) {
-					check(test.instance());
-					QUnit.start();
-				} else {
-					var config = $.extend({
-						"appkey": "test.aboutecho.com",
-						"target": $("#qunit-fixture")
-					}, test.instance.config || {});
-					var component = Echo.Utils.getComponent(test.instance.name);
-					var instance = new component(config);
-					check(instance);
-				}
+				});
 			});
+		} else {
+			/*QUnit.test(name, function() {
+				self.prepareEnvironment(test, function() {
+					setTimeout(function() {
+						self.initIframe();
+						QUnit.iframe.setAttribute("src", window.location.href + "?filter=" + module + ": " + name + "&bp_channel=max-" + count);
+					}, 5);
+				});
+			});*/
+//			var name = "?filter=" + module + ": " + name + "&bp_channel=max-" + count;
+			
+		}
+	});
+};
+
+Echo.Tests.Common.prototype.assemble = function(module) {
+	var id = 0, self = this;
+	Echo.Utils.foldl(Echo.Tests.tests, this.tests, function(test, acc, name) {
+		test.config = test.config || {};
+		var _name = test.config.name || self.normalizeName(name);
+		acc.push({
+			"id": id++,
+			"name": _name,
+			"url": window.location.href + "?filter=" + module + ": " + _name + "&bp_channel=max-" + id,
+			"instance": test //,
+			//"iframe": Echo.Tests.initIframe()
 		});
 	});
+};
+
+Echo.Tests.run = function() {
+		if (!Echo.Tests.tests.length) {
+			console.log("No more tests in the queue!");
+			return;
+		}
+		var test = Echo.Tests.tests.shift();
+		setTimeout(function() {
+			var iframe = Echo.Tests.initIframe();
+			iframe.setAttribute("src", test.url);
+			Echo.Tests.running++;
+		}, 5);
+};
+
+Echo.Tests.onTestFinish = function(data) {
+//	console.log(arguments);
+//	QUnit.push( data.result, data.actual, data.expected, data.message );
+	Echo.Tests.running--;
+	if (!Echo.Tests.running) {
+			console.log("FINISHED!");
+			return;
+	}
+	console.log("Running tests count: " + Echo.Tests.running);
+	Echo.Tests.run();
 };
 
 Echo.Tests.Common.prototype.sequentialAsyncTests = function(funcs, namespace) {
