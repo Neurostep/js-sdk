@@ -8,10 +8,34 @@ if (!Echo.Tests) Echo.Tests = {"Unit": {}, "Common": {}};
 // collection of component initializers
 var _initializers = {};
 
+// URL params cache to prevent multiple extractions
+var _urlParams;
+
+// extracting GET parameters from URL
+Echo.Tests.getURLParams = function() {
+	if (!window.location.search) return {};
+	if (!_urlParams) {
+		_urlParams = {};
+		var query = window.location.search.substring(1);
+		var vars = query.split("&");
+		for (var i = 0; i < vars.length; i++) {
+			var pair = vars[i].split("=");
+			_urlParams[pair[0]] = decodeURIComponent(pair[1]);
+		}
+	}
+	return _urlParams;
+};
+
+// extract specifig GET parameter form URL
+Echo.Tests.getURLParam = function(name) {
+	return Echo.Tests.getURLParams()[name];
+};
+
 Echo.Tests.runTests = function() {
 	Backplane.init({
 		"serverBaseURL" : "http://api.echoenabled.com/v1",
-		"busName": "jskit"		
+		"busName": "jskit",
+		"channelName": Echo.Tests.getURLParam("bp_channel")
 	});
 	$.each(this.Unit, function(name, suiteClass) {
 		$.extend(suiteClass.prototype, new Echo.Tests.Common());
@@ -353,6 +377,8 @@ Echo.Tests.Stats = {
 		});
 	},
 	"prepare": function() {
+
+		Echo.Tests.Events = {"contracts": {}};
 
 		Echo.Tests.Stats.getFunctionNames(Echo, "Echo.");
 
