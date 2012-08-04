@@ -31,6 +31,12 @@ Echo.Tests.getURLParam = function(name) {
 	return Echo.Tests.getURLParams()[name];
 };
 
+Echo.Tests.isDependent = function() {
+	// we treat "bp_channel" param presense as an indicator
+	// that this window is a dependent one
+	return !!Echo.Tests.getURLParam("bp_channel");
+};
+
 Echo.Tests.runTests = function() {
 	Backplane.init({
 		"serverBaseURL" : "http://api.echoenabled.com/v1",
